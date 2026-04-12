@@ -1,0 +1,112 @@
+<?php   if (session_status() === PHP_SESSION_NONE) { 
+    ini_set("session.gc_maxlifetime", 604800);
+    ini_set("session.cookie_lifetime", 604800);
+    session_set_cookie_params(604800);
+    session_start(); 
+}
+include('../includes/dbconnection.php');
+if (!isset($_SESSION['frsaid']) || strlen($_SESSION['frsaid']) == 0) {
+  header('location:logout.php');
+  } else{
+ // Code for deletion   
+if(isset($_GET['action']) && $_GET['action']=='delete'){
+$rid=isset($_GET['bsid']) ? intval($_GET['bsid']) : 0;
+$query=mysqli_query($con,"delete from recipes where id='$rid'");
+if($query){
+unlink($ppicpath);
+echo "<script>alert('Recipe deleted successfully.');</script>";
+echo "<script type='text/javascript'> document.location = 'manage-recipes.php'; </script>";
+} else {
+echo "<script>alert('Something went wrong. Please try again.');</script>";
+}
+
+}
+?>
+
+
+<!DOCTYPE html>
+<head>
+<title>Food Recipe System || Manage Recipe Detail </title>
+
+</head>
+<body>
+<section id="container">
+<!--header start-->
+<?php include_once('includes/header.php');?>
+<!--header end-->
+<!--sidebar start-->
+<?php include_once('includes/sidebar.php');?>
+<!--sidebar end-->
+<!--main content start-->
+<section id="main-content">
+	<section class="wrapper">
+		<div class="table-agile-info">
+ <div class="card">
+    <div class="card-header">
+    <?php echo (isset($_GET['uname']) ? htmlspecialchars($_GET['uname']) : '');?>'s Recipes
+    </div>
+    <div>
+      <table class="table" ui-jq="footable" ui-options='{
+        "paging": {
+          "enabled": true
+        },
+        "filtering": {
+          "enabled": true
+        },
+        "sorting": {
+          "enabled": true
+        }}'>
+        <thead>
+          <tr>
+            <th data-breakpoints="xs">S.NO</th>
+            <th>Recipe Title</th>
+            <th>Recipe Prep. Time</th>
+            <th>Recipe Cook Time</th>
+            <th>Recipe Yields</th>
+            <th>Listing Date</th>
+            <th data-breakpoints="xs">Action</th>
+           
+           
+          </tr>
+        </thead>
+        <?php
+$uid=isset($_GET['uid']) ? intval($_GET['uid']) : 0;       
+$ret=mysqli_query($con,"select * from  recipes where userId='$uid'");
+$cnt=1;
+while ($row=mysqli_fetch_array($ret)) {
+?>
+        <tbody>
+          <tr data-expanded="true">
+            <td><?php echo $cnt;?></td>
+            <td><?php  echo $row['recipeTitle'];?></td>
+            <td><?php  echo $row['recipePrepTime'];?> Minutes</td>
+              <td><?php  echo $row['recipeCookTime'];?> Minutes</td>
+              <td><?php  echo $row['recipeYields'];?> Serves</td>
+                  <td><?php  echo $row['postingDate'];?></td>
+                  <td><a href="edit-recipe.php?recipeid=<?php echo $row['id'];?>" class="btn btn-primary btn-sm">Edit</a>
+                    <a href="manage-food-details.php?action=delete&&bsid=<?php echo $row['ID']; ?>"  title="Delete this record" onclick="return confirm('Do you really want to delete this record?');" class="btn btn-danger btn-sm">Delete </a>
+                </tr>
+                <?php 
+$cnt=$cnt+1;
+}?>
+ </tbody>
+            </table>
+            
+            
+          
+    </div>
+  </div>
+</div>
+</section>
+ <!-- footer -->
+		 <?php include_once('includes/footer.php');?>  
+  <!-- / footer -->
+</section>
+
+<!--main content end-->
+</section>
+<script src="js/bootstrap.bundle.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
+<?php }  ?>
