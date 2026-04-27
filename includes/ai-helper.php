@@ -22,15 +22,16 @@ You are a professional nutritionist and food expert. Analyze the following list 
 
 For each ingredient, you must:
 1. **Separate** the quantity/unit from the ingredient name.
-2. **Normalize the ingredient name** to the most common, standard name IN THE SAME LANGUAGE as the input. 
-   - If the input is Vietnamese, normalize to standard Vietnamese (e.g., "ngò rí" → "rau mùi", "đậu phộng" → "đậu phộng").
-   - If the input is English, normalize to standard English (e.g., "coriander leaves" → "cilantro").
-   - Do NOT translate between languages. Keep the original language.
-3. **Convert the quantity to grams (for solids) or milliliters (for liquids)**.
+2. **Normalize the ingredient name** to a standard English canonical name (e.g., "trứng" → "egg", "bột mì" → "flour", "coriander leaves" → "cilantro", "ngò rí" → "cilantro").
+   - ALWAYS output the canonical name in English regardless of input language.
+   - If the input is Vietnamese, translate and normalize to standard English.
+   - If the input is English, normalize to standard English.
+3. **Provide the Vietnamese name** for the ingredient in the `nameVi` field (e.g., "egg" → "trứng", "flour" → "bột mì").
+4. **Convert the quantity to grams (for solids) or milliliters (for liquids)**.
    - Use standard cooking conversions (1 cup = 240ml, 1 tbsp = 15ml, 1 tsp = 5ml, etc.)
    - For items counted by pieces (e.g., "3 eggs"), estimate the weight in grams.
-4. **Provide calories per 100g** for each ingredient.
-5. **Split multiple ingredients**: If a single line contains multiple ingredients (e.g. separated by commas, "and", "với"), split them into separate output objects.
+5. **Provide calories per 100g** for each ingredient.
+6. **Split multiple ingredients**: If a single line contains multiple ingredients (e.g. separated by commas, "and", "với"), split them into separate output objects.
 
 INGREDIENTS LIST:
 {$ingredientList}
@@ -41,7 +42,8 @@ RESPOND WITH ONLY VALID JSON (no markdown, no code blocks, no explanation), usin
   "ingredients": [
     {
       "original": "<original input string>",
-      "canonicalName": "<normalized name, same language>",
+      "canonicalName": "<normalized English name, e.g. 'egg', 'flour', 'chicken breast'>",
+      "nameVi": "<Vietnamese name, e.g. 'trứng', 'bột mì', 'ức gà'>",
       "quantityOriginal": "<original quantity+unit, e.g. '2 cups'>",
       "quantityGrams": <number in grams or ml>,
       "caloriesPer100g": <integer>,
@@ -146,30 +148,43 @@ function saveIngredientsToDb(mysqli $con, int $recipeId, array $aiResult): bool 
 
     foreach ($aiResult['ingredients'] as $ing) {
         $canonicalName = trim($ing['canonicalName']);
+        $nameVi = trim($ing['nameVi'] ?? '');
         $caloriesPer100g = intval($ing['caloriesPer100g'] ?? 0);
         $standardUnit = $ing['standardUnit'] ?? 'g';
         $quantityOriginal = $ing['quantityOriginal'] ?? '';
         $quantityGrams = floatval($ing['quantityGrams'] ?? 0);
 
-        // Check if ingredient already exists (case-insensitive)
-        $stmt = $con->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?)");
-        $stmt->bind_param("s", $canonicalName);
+        // Check if ingredient already exists — match by English name, Vietnamese name,
+        // or old rows that stored a Vietnamese name directly in the `name` column
+        $stmt = $con->prepare(
+            "SELECT id FROM ingredients
+             WHERE LOWER(name) = LOWER(?)
+                OR LOWER(name) = LOWER(?)
+                OR (name_vi IS NOT NULL AND LOWER(name_vi) = LOWER(?))
+             LIMIT 1"
+        );
+        $stmt->bind_param("sss", $canonicalName, $nameVi, $nameVi);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         if ($row = $result->fetch_assoc()) {
             $ingredientId = $row['id'];
-            // Update calorie info if we have better data
-            if ($caloriesPer100g > 0) {
-                $updateStmt = $con->prepare("UPDATE ingredients SET caloriesPer100g = ?, standardUnit = ? WHERE id = ? AND caloriesPer100g = 0");
-                $updateStmt->bind_param("isi", $caloriesPer100g, $standardUnit, $ingredientId);
-                $updateStmt->execute();
-                $updateStmt->close();
-            }
+            // Update calorie info and name_vi if we have better data
+            $updateStmt = $con->prepare(
+                "UPDATE ingredients SET
+                    caloriesPer100g = IF(caloriesPer100g = 0 AND ? > 0, ?, caloriesPer100g),
+                    standardUnit    = IF(caloriesPer100g = 0 AND ? > 0, ?, standardUnit),
+                    name_vi         = IF(name_vi IS NULL AND ? != '', ?, name_vi)
+                 WHERE id = ?"
+            );
+            $updateStmt->bind_param("iisissi", $caloriesPer100g, $caloriesPer100g, $caloriesPer100g, $standardUnit, $nameVi, $nameVi, $ingredientId);
+            $updateStmt->execute();
+            $updateStmt->close();
         } else {
             // Insert new ingredient
-            $insertStmt = $con->prepare("INSERT INTO ingredients (name, caloriesPer100g, standardUnit) VALUES (?, ?, ?)");
-            $insertStmt->bind_param("sis", $canonicalName, $caloriesPer100g, $standardUnit);
+            $insertStmt = $con->prepare("INSERT INTO ingredients (name, name_vi, caloriesPer100g, standardUnit) VALUES (?, ?, ?, ?)");
+            $nameViParam = $nameVi !== '' ? $nameVi : null;
+            $insertStmt->bind_param("ssis", $canonicalName, $nameViParam, $caloriesPer100g, $standardUnit);
             $insertStmt->execute();
             $ingredientId = $con->insert_id;
             $insertStmt->close();
@@ -196,7 +211,7 @@ function saveIngredientsToDb(mysqli $con, int $recipeId, array $aiResult): bool 
 // Load ingredients for a recipe from database
 function loadRecipeIngredients(mysqli $con, int $recipeId): array {
     $stmt = $con->prepare(
-        "SELECT i.name, ri.quantityOriginal, ri.quantityGrams, i.caloriesPer100g, i.standardUnit 
+        "SELECT i.name, i.name_vi, ri.quantityOriginal, ri.quantityGrams, i.caloriesPer100g, i.standardUnit
          FROM recipe_ingredients ri
          JOIN ingredients i ON ri.ingredient_id = i.id
          WHERE ri.recipe_id = ?

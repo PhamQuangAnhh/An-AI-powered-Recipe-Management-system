@@ -87,11 +87,12 @@ while ($row = mysqli_fetch_array($ret)) {
                         <ul class="ingredients-list">
 <?php
 foreach ($ingredients as $ing) {
+    $ingName = !empty($ing['name_vi']) ? $ing['name_vi'] : $ing['name'];
     $displayText = '';
     if (!empty($ing['quantityOriginal'])) {
-        $displayText = $ing['quantityOriginal'] . ' ' . $ing['name'];
+        $displayText = $ing['quantityOriginal'] . ' ' . $ingName;
     } else {
-        $displayText = $ing['name'];
+        $displayText = $ingName;
     }
     // Show grams conversion if available
     $gramsNote = '';
